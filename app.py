@@ -290,6 +290,13 @@ st.markdown(
             #0a0a0c;
     }
     html, body, [class*="st-"] { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+    /* pin the theme vars so a browser theme override cannot repaint widgets */
+    :root, .stApp {
+        --primary-color: #e01b24;
+        --background-color: #0a0a0c;
+        --secondary-background-color: #15161a;
+        --text-color: #d3d3da;
+    }
     /* the rule above also hits icon spans, which must keep their glyph font */
     [data-testid="stIconMaterial"], .material-symbols-rounded {
         font-family: "Material Symbols Rounded" !important;
@@ -405,6 +412,84 @@ st.markdown(
     .log-head { color: #e01b24; font-size: 0.68rem; letter-spacing: 0.16em; text-transform: uppercase; }
     .log-body { color: #d3d3da; font-size: 0.88rem; margin-top: 0.3rem; }
 
+    /* ---- tables: never inherit a white canvas or bright theme borders ---- */
+    .pt-wrap {
+        overflow-x: auto;
+        border: 1px solid #26262e;
+        background: #0f1013;
+    }
+    table.pt {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+    }
+    table.pt th {
+        text-align: left;
+        background: #17181d;
+        color: #8f8f9b;
+        font-size: 0.66rem;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        padding: 0.62rem 0.85rem;
+        border-bottom: 1px solid #2c2c34;
+        white-space: nowrap;
+    }
+    table.pt td {
+        padding: 0.62rem 0.85rem;
+        border-bottom: 1px solid #1e1e25;
+        color: #d3d3da;
+        vertical-align: top;
+        line-height: 1.55;
+    }
+    table.pt tbody tr:last-child td { border-bottom: none; }
+    table.pt tbody tr:hover td { background: #15161a; }
+    table.pt td strong { color: #f4f4f6; font-weight: 600; }
+    table.pt th.num, table.pt td.num { text-align: right; white-space: nowrap; }
+    table.pt .meter {
+        display: inline-block;
+        width: 90px;
+        height: 8px;
+        background: #1d1417;
+        border: 1px solid #3a1d22;
+        margin-right: 0.6rem;
+        vertical-align: middle;
+    }
+    table.pt .meter > span {
+        display: block;
+        height: 100%;
+        background: linear-gradient(90deg, #7a1016, #e01b24);
+    }
+    table.pt .meter-val { color: #e01b24; font-weight: 600; }
+
+    /* native st.table, restyled to match */
+    [data-testid="stTable"] table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+    }
+    [data-testid="stTable"] th,
+    [data-testid="stTable"] td {
+        border: none !important;
+        border-bottom: 1px solid #1e1e25 !important;
+        padding: 0.6rem 0.85rem !important;
+        text-align: left !important;
+        color: #d3d3da !important;
+        vertical-align: top !important;
+    }
+    [data-testid="stTable"] th {
+        background: #17181d !important;
+        color: #8f8f9b !important;
+        font-size: 0.66rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.16em !important;
+        text-transform: uppercase !important;
+        border-bottom: 1px solid #2c2c34 !important;
+        white-space: nowrap;
+    }
+    [data-testid="stTable"] tbody tr:hover td { background: #15161a !important; }
+    [data-testid="stTable"] > div { border: 1px solid #26262e; background: #0f1013; }
+
     .shot { margin: 0; }
     .shot img {
         width: 100%;
@@ -486,6 +571,36 @@ def timeline(items: list[dict]) -> str:
 def badges(tools: list[str]) -> None:
     html = " ".join(f'<span class="badge">{tool}</span>' for tool in tools)
     st.markdown(html, unsafe_allow_html=True)
+
+
+def meter(score: int) -> str:
+    width = max(0, min(100, score))
+    return (
+        f'<span class="meter"><span style="width:{width}%"></span></span>'
+        f'<span class="meter-val">{score}</span>'
+    )
+
+
+def data_table(headers: list[str], rows: list[list[str]], numeric: set[int] | None = None) -> None:
+    """Render a dark table as plain HTML so no canvas or theme can paint it white."""
+    numeric = numeric or set()
+    head = "".join(
+        f'<th class="{"num" if i in numeric else ""}">{h}</th>' for i, h in enumerate(headers)
+    )
+    body = "".join(
+        "<tr>"
+        + "".join(
+            f'<td class="{"num" if i in numeric else ""}">{cell}</td>'
+            for i, cell in enumerate(row)
+        )
+        + "</tr>"
+        for row in rows
+    )
+    st.markdown(
+        f'<div class="pt-wrap"><table class="pt"><thead><tr>{head}</tr></thead>'
+        f"<tbody>{body}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -810,16 +925,11 @@ def page_skills() -> None:
             st.altair_chart(chart, width="stretch")
 
         if view in ("Table", "Both"):
-            st.dataframe(
-                view_df.sort_values("Score", ascending=False)[["Skill", "Category", "Score"]],
-                hide_index=True,
-                width="stretch",
-                column_config={
-                    "Score": st.column_config.ProgressColumn(
-                        "Confidence", min_value=0, max_value=100, format="%d"
-                    )
-                },
-            )
+            rows = [
+                [record.Skill, record.Category, meter(int(record.Score))]
+                for record in view_df.sort_values("Score", ascending=False).itertuples()
+            ]
+            data_table(["Skill", "Area", "Confidence"], rows, numeric={2})
 
     st.divider()
     st.subheader("Average by area")
@@ -1037,8 +1147,20 @@ def page_projects() -> None:
         include_archived = st.checkbox("Include early projects", value=False)
 
         rows = [row for row in MORE_WORK if row["core"] or include_archived]
-        more_df = pd.DataFrame(rows).drop(columns=["core"])
-        st.dataframe(more_df, hide_index=True, width="stretch")
+        data_table(
+            ["Project", "Role", "Year", "Stack", "Notes"],
+            [
+                [
+                    f'<strong>{row["Project"]}</strong>',
+                    row["Role"],
+                    row["Year"],
+                    row["Stack"],
+                    row["Note"],
+                ]
+                for row in rows
+            ],
+            numeric={2},
+        )
         st.caption(
             "Adobo Engine is the one I would hand you first. A 2D/3D engine in C with an ECS, "
             "a sprite batcher, an ImGui editor, and no AI anywhere in the source."
